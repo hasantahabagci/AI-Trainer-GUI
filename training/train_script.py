@@ -32,13 +32,11 @@ def train_model(model_name, epochs, batch_size, learning_rate, use_data_augmenta
         device = torch.device("cuda")
     elif device_str == "mps" and hasattr(torch.backends, "mps") and torch.backends.mps.is_available(): # Check for MPS
         device = torch.device("mps")
-        # Fallback for operations not supported on MPS, if necessary
-        # Can also check torch.backends.mps.is_built()
     else:
         device = torch.device("cpu") # Default to CPU
-        if device_str == "cuda":
+        if device_str == "cuda" and not torch.cuda.is_available():
             print("LOG:CUDA selected but not available, falling back to CPU.")
-        elif device_str == "mps":
+        elif device_str == "mps" and not (hasattr(torch.backends, "mps") and torch.backends.mps.is_available()):
             print("LOG:MPS selected but not available/built, falling back to CPU.")
             
     print(f"LOG:Using device: {device}")
@@ -47,6 +45,7 @@ def train_model(model_name, epochs, batch_size, learning_rate, use_data_augmenta
 
     if model_name not in MODEL_FACTORIES: # Check if model is available
         print(f"ERROR:Model {model_name} not found.")
+        sys.stdout.flush()
         return
     
     model = MODEL_FACTORIES[model_name](num_classes=10, pretrained=use_pretrained) # Instantiate model
@@ -62,8 +61,8 @@ def train_model(model_name, epochs, batch_size, learning_rate, use_data_augmenta
         correct_train = 0
         total_train = 0
         
-        # Use tqdm for progress bar, ensuring output is flushed for QProcess
-        train_pbar = tqdm(enumerate(trainloader), total=len(trainloader), desc=f"Epoch {epoch+1}/{epochs} [Train]", file=sys.stdout, flush=True, leave=False, bar_format='{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}{postfix}]')
+        # Use tqdm for progress bar, REMOVED flush=True
+        train_pbar = tqdm(enumerate(trainloader), total=len(trainloader), desc=f"Epoch {epoch+1}/{epochs} [Train]", file=sys.stdout, leave=False, bar_format='{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}{postfix}]')
         
         for i, data in train_pbar:
             inputs, labels = data[0].to(device), data[1].to(device) # Get inputs and labels
@@ -80,19 +79,24 @@ def train_model(model_name, epochs, batch_size, learning_rate, use_data_augmenta
             
             current_batch_acc = (predicted == labels).sum().item() / labels.size(0) if labels.size(0) > 0 else 0
             train_pbar.set_postfix_str(f"Loss: {loss.item():.3f}, Acc: {current_batch_acc:.3f}")
-            if i % (len(trainloader) // 10) == 0 or i == len(trainloader) -1 : # Print progress update less frequently for less noise
-                 sys.stdout.flush() # Ensure output is sent
+            # Flushing stdout frequently for tqdm updates to QProcess might be too noisy or unnecessary
+            # tqdm should handle its own updates to sys.stdout.
+            # Let's flush only for less frequent, explicit prints.
+            # if i % (len(trainloader) // 10) == 0 or i == len(trainloader) -1 :
+            #      sys.stdout.flush()
 
         train_loss_epoch = running_loss / len(trainloader) if len(trainloader) > 0 else 0
         train_acc_epoch = 100 * correct_train / total_train if total_train > 0 else 0
         train_pbar.close()
+        sys.stdout.flush() # Flush after closing train_pbar
 
         # Validation
         model.eval() # Set model to evaluation mode
         correct_val = 0
         total_val = 0
         val_loss = 0.0
-        val_pbar = tqdm(enumerate(testloader), total=len(testloader), desc=f"Epoch {epoch+1}/{epochs} [Val]", file=sys.stdout, flush=True, leave=False, bar_format='{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}{postfix}]')
+        # Use tqdm for progress bar, REMOVED flush=True
+        val_pbar = tqdm(enumerate(testloader), total=len(testloader), desc=f"Epoch {epoch+1}/{epochs} [Val]", file=sys.stdout, leave=False, bar_format='{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}{postfix}]')
         with torch.no_grad(): # No gradients needed for validation
             for i, data in val_pbar:
                 images, labels = data[0].to(device), data[1].to(device)
@@ -105,13 +109,14 @@ def train_model(model_name, epochs, batch_size, learning_rate, use_data_augmenta
 
                 current_batch_acc_val = (predicted == labels).sum().item() / labels.size(0) if labels.size(0) > 0 else 0
                 val_pbar.set_postfix_str(f"Loss: {loss.item():.3f}, Acc: {current_batch_acc_val:.3f}")
-                if i % (len(testloader) // 10) == 0 or i == len(testloader) - 1:
-                    sys.stdout.flush()
+                # if i % (len(testloader) // 10) == 0 or i == len(testloader) - 1:
+                #    sys.stdout.flush()
 
 
         val_loss_epoch = val_loss / len(testloader) if len(testloader) > 0 else 0
         val_acc_epoch = 100 * correct_val / total_val if total_val > 0 else 0
         val_pbar.close()
+        sys.stdout.flush() # Flush after closing val_pbar
         
         scheduler.step() # Step the scheduler
 
@@ -139,7 +144,7 @@ if __name__ == "__main__":
     parser.add_argument("--learning_rate", type=float, default=0.001, help="Learning rate for the optimizer")
     parser.add_argument("--use_data_augmentation", action='store_true', help="Enable data augmentation")
     parser.add_argument("--use_pretrained", action='store_true', help="Use pretrained weights for ResNet/VGG")
-    parser.add_argument("--device", type=str, default="cpu", choices=["cpu", "cuda", "mps"], help="Device to use (cpu, cuda, or mps)") # Added mps to choices
+    parser.add_argument("--device", type=str, default="cpu", choices=["cpu", "cuda", "mps"], help="Device to use (cpu, cuda, or mps)")
     
     args = parser.parse_args()
 
