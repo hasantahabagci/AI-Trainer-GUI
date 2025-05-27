@@ -1,0 +1,10 @@
+# Hasan Taha Bağcı
+# 150210338
+# Project Dependencies
+
+PyQt5>=5.15
+torch>=1.8
+torchvision>=0.9
+matplotlib>=3.3
+numpy>=1.19
+tqdm>=4.60
