@@ -1,9 +1,10 @@
 # AI-Trainer-GUI
 
 **Author:** Hasan Taha **Bağcı (150210338)**
-**Python Version: 3.11.11**
 
 ## Project Summary
+
+![alt text](https://github.com/hasantahabagci/AI-Trainer-GUI/content/sample.png?raw=true "AI-Trainer-GUI Screenshot")
 
 AI-Trainer-GUI is a Python application designed for the comparative analysis of Convolutional Neural Network (CNN) architectures for image classification. This project focuses on evaluating the performance of ResNet50, VGG16, and a custom-built CNN on the CIFAR-10 dataset.
 
