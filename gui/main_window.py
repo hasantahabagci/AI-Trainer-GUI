@@ -1,192 +1,328 @@
-# Hasan Taha Bağcı
-# 150210338
-# Main Application Window for CNN Comparative Analysis
+# Hasan Taha Bağcı 150210338
+# gui/main_window.py
 
-from PyQt5.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
-                             QSplitter, QMessageBox, QPushButton, QDialog, QLabel)
-from PyQt5.QtCore import Qt, pyqtSlot
-import collections
+import sys
+import os
+import json
+from PyQt5.QtWidgets import (
+    QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
+    QFormLayout, QGroupBox, QLabel, QComboBox, QLineEdit, QPushButton, 
+    QTextEdit, QSplitter, QCheckBox, QSpinBox, QDoubleSpinBox, QMessageBox
+)
+from PyQt5.QtCore import Qt, QProcess, QTimer
 
-from .widgets.control_panel import ControlPanel         # Import control panel widget
-from .widgets.log_viewer import LogViewer               # Import log viewer widget
-from .widgets.plot_widget import PlotWidget             # Import plot widget
-from .training_worker import TrainingWorker             # Import training worker
+from .plot_widget import PlotWidget 
 
-class MainWindow(QMainWindow): # Main window class
-    def __init__(self, parent=None): # Constructor
-        super().__init__(parent)
-        self.setWindowTitle("Comparative Analysis of CNN Architectures for Image Classification") # Set window title [cite: 1]
-        self.setGeometry(100, 100, 1200, 800) # Set window geometry (x, y, width, height)
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+from core.utils import get_available_devices
+from models.cnn_models import AVAILABLE_MODELS
 
-        # Central widget and main layout
-        self.central_widget = QWidget() # Create central widget
-        self.setCentralWidget(self.central_widget) # Set central widget
-        self.main_layout = QHBoxLayout(self.central_widget) # Main horizontal layout
 
-        # Create main components
-        self.control_panel = ControlPanel() # Create control panel [cite: 20]
-        self.log_viewer = LogViewer() # Create log viewer
-        self.plot_widget = PlotWidget() # Create plot widget [cite: 19]
-        self.comparison_plot_widget = PlotWidget() # Separate plot for comparisons [cite: 25]
-        self.comparison_plot_widget.setWindowTitle("Model Performance Comparison")
+class MainWindow(QMainWindow):
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle("AI Trainer GUI - Hasan Taha Bagci 150210338")
+        self.setGeometry(50, 50, 1200, 800) # Increased window size
 
-        # Store results for comparison
-        self.all_training_results = collections.OrderedDict() # Stores {model_name: {epochs:[], val_acc:[], ...}}
+        self.central_widget = QWidget()
+        self.setCentralWidget(self.central_widget)
+        self.main_layout = QHBoxLayout(self.central_widget)
 
-        # Layouting with a splitter
-        left_v_layout = QVBoxLayout() # Vertical layout for left panel
-        left_v_layout.addWidget(self.control_panel)
+        self.training_process = None # For QProcess
+        self.is_training_running = False
+
+        self._init_ui()
+
+    def _init_ui(self):
+        config_panel = QWidget()
+        config_layout = QVBoxLayout(config_panel)
+        config_layout.setAlignment(Qt.AlignTop) # Align widgets to the top
+
+        # Model Selection Group
+        model_group = QGroupBox("Model Configuration")
+        model_form = QFormLayout()
+        self.model_combo = QComboBox()
+        self.model_combo.addItems(list(AVAILABLE_MODELS.keys()))
+        model_form.addRow("Select Model:", self.model_combo)
         
-        self.compare_button = QPushButton("Show/Refresh Comparison Plot") # Button for comparison plot
-        self.compare_button.clicked.connect(self.show_comparison_plot)
-        left_v_layout.addWidget(self.compare_button)
-        left_v_layout.addStretch()
+        self.pretrained_checkbox = QCheckBox("Use Pretrained Weights")
+        self.pretrained_checkbox.setChecked(True)
+        model_form.addRow(self.pretrained_checkbox)
+        self.model_combo.currentTextChanged.connect(self._toggle_pretrained_option) # Enable/disable based on model
+        self._toggle_pretrained_option(self.model_combo.currentText()) # Initial check
+
+        model_group.setLayout(model_form)
+        config_layout.addWidget(model_group)
+
+        # Training Parameters Group
+        params_group = QGroupBox("Training Parameters")
+        params_form = QFormLayout()
+        self.epochs_spinbox = QSpinBox()
+        self.epochs_spinbox.setRange(1, 500)
+        self.epochs_spinbox.setValue(10)
+        params_form.addRow("Epochs:", self.epochs_spinbox)
+
+        self.lr_spinbox = QDoubleSpinBox()
+        self.lr_spinbox.setRange(0.00001, 0.1)
+        self.lr_spinbox.setSingleStep(0.0001)
+        self.lr_spinbox.setDecimals(5)
+        self.lr_spinbox.setValue(0.001)
+        params_form.addRow("Learning Rate:", self.lr_spinbox)
+
+        self.batch_size_spinbox = QSpinBox()
+        self.batch_size_spinbox.setRange(16, 512) # Common batch sizes
+        self.batch_size_spinbox.setSingleStep(16)
+        self.batch_size_spinbox.setValue(64)
+        params_form.addRow("Batch Size:", self.batch_size_spinbox)
+
+        self.optimizer_combo = QComboBox()
+        self.optimizer_combo.addItems(["Adam", "SGD"])
+        params_form.addRow("Optimizer:", self.optimizer_combo)
         
-        left_panel_widget = QWidget()
-        left_panel_widget.setLayout(left_v_layout)
+        self.augment_data_checkbox = QCheckBox("Augment Training Data")
+        self.augment_data_checkbox.setChecked(True)
+        params_form.addRow(self.augment_data_checkbox)
 
-        right_splitter = QSplitter(Qt.Vertical) # Vertical splitter for log and plot
-        right_splitter.addWidget(self.log_viewer)
-        right_splitter.addWidget(self.plot_widget)
-        right_splitter.setSizes([300, 500]) # Initial sizes for log and plot areas
+        params_group.setLayout(params_form)
+        config_layout.addWidget(params_group)
 
-        main_splitter = QSplitter(Qt.Horizontal) # Horizontal splitter for control and (log+plot)
-        main_splitter.addWidget(left_panel_widget)
-        main_splitter.addWidget(right_splitter)
-        main_splitter.setSizes([300, 900]) # Initial sizes for left and right panels
-
-        self.main_layout.addWidget(main_splitter) # Add main splitter to layout
-        self.central_widget.setLayout(self.main_layout) # Set main layout for central widget
-
-        # Connections
-        self.control_panel.start_training_signal.connect(self.on_start_training_clicked) # Connect start training signal
-
-        self.current_training_worker = None # To hold the current training worker
-
-    @pyqtSlot(dict)
-    def on_start_training_clicked(self, params): # Slot for start training button click
-        model_name = params.get("model_name", "UnknownModel")
-        self.log_viewer.clear_logs() # Clear previous logs
-        self.plot_widget.reset_plot(model_name=model_name) # Reset plot for new training
-        self.control_panel.set_training_active(True) # Disable controls
-        self.log_viewer.append_log(f"Preparing to train {model_name}...")
-
-        # Store current model's data for comparison plot later
-        if model_name not in self.all_training_results:
-            self.all_training_results[model_name] = {
-                'epochs': [], 'train_acc': [], 'val_acc': [],
-                'train_loss': [], 'val_loss': [], 'params': params
-            }
-        else: # Reset data if re-training the same model in this session
-            self.all_training_results[model_name]['epochs'].clear()
-            self.all_training_results[model_name]['train_acc'].clear()
-            self.all_training_results[model_name]['val_acc'].clear()
-            self.all_training_results[model_name]['train_loss'].clear()
-            self.all_training_results[model_name]['val_loss'].clear()
-            self.all_training_results[model_name]['params'] = params
-
-
-        self.current_training_worker = TrainingWorker(params) # Create training worker [cite: 21]
-        self.current_training_worker.log_message.connect(self.log_viewer.append_log) # Connect log signal
-        self.current_training_worker.tqdm_output_signal.connect(self.log_viewer.update_tqdm_output) # Connect tqdm signal
-        self.current_training_worker.epoch_metric_received.connect(self.handle_epoch_metric) # Connect metric signal
-        self.current_training_worker.epoch_progress_update.connect(self.log_viewer.update_epoch_progress)
-        self.current_training_worker.training_finished.connect(self.handle_training_finished) # Connect finished signal
-        self.current_training_worker.training_error.connect(self.handle_training_error) # Connect error signal
-        self.current_training_worker.start() # Start the training thread
-
-    @pyqtSlot(dict)
-    def handle_epoch_metric(self, metrics): # Slot to handle epoch metrics [cite: 24]
-        self.plot_widget.update_plot(metrics) # Update live plot
+        # Device Selection Group
+        device_group = QGroupBox("Device Configuration")
+        device_form = QFormLayout()
+        self.device_combo = QComboBox()
+        self.available_devices = get_available_devices()
+        self.device_combo.addItems(self.available_devices)
+        # Try to pre-select a GPU if available
+        if 'mps' in self.available_devices:
+            self.device_combo.setCurrentText('mps')
+        elif 'cuda' in self.available_devices:
+            self.device_combo.setCurrentText('cuda')
+        device_form.addRow("Select Device:", self.device_combo)
+        device_group.setLayout(device_form)
+        config_layout.addWidget(device_group)
         
-        # Store data for comparison plot
-        model_name = self.control_panel.model_combo.currentText() # Get current model name
-        if model_name in self.all_training_results:
-            self.all_training_results[model_name]['epochs'].append(metrics['epoch'])
-            self.all_training_results[model_name]['train_acc'].append(metrics['train_acc'])
-            self.all_training_results[model_name]['val_acc'].append(metrics['val_acc'])
-            self.all_training_results[model_name]['train_loss'].append(metrics['train_loss'])
-            self.all_training_results[model_name]['val_loss'].append(metrics['val_loss'])
-
-    @pyqtSlot(str)
-    def handle_training_finished(self, model_name): # Slot for training finished
-        self.log_viewer.append_log(f"SUCCESS: Training for {model_name} completed.")
-        QMessageBox.information(self, "Training Complete", f"Training for {model_name} has finished successfully.")
-        self.control_panel.set_training_active(False) # Re-enable controls
-        self.current_training_worker = None
-
-    @pyqtSlot(str)
-    def handle_training_error(self, error_message): # Slot for training error
-        self.log_viewer.append_log(f"ERROR: {error_message}")
-        QMessageBox.critical(self, "Training Error", error_message)
-        self.control_panel.set_training_active(False) # Re-enable controls
-        if self.current_training_worker: # Clean up worker if it still exists
-             if self.current_training_worker.isRunning():
-                  self.current_training_worker.quit()
-                  self.current_training_worker.wait()
-             self.current_training_worker = None
-
-
-    def show_comparison_plot(self): # Method to show comparison plot [cite: 25]
-        self.comparison_plot_widget.reset_plot("Model Comparison") # Reset comparison plot
+        # Control Buttons
+        control_group = QGroupBox("Controls")
+        control_layout = QVBoxLayout()
+        self.start_button = QPushButton("Start Training")
+        self.start_button.clicked.connect(self.start_training)
+        self.start_button.setStyleSheet("background-color: #4CAF50; color: white; padding: 10px; border-radius: 5px;")
         
-        if not self.all_training_results:
-            QMessageBox.information(self, "No Data", "No training results available to compare. Please train one or more models.")
+        self.stop_button = QPushButton("Stop Training")
+        self.stop_button.clicked.connect(self.stop_training)
+        self.stop_button.setEnabled(False)
+        self.stop_button.setStyleSheet("background-color: #f44336; color: white; padding: 10px; border-radius: 5px;")
+        
+        control_layout.addWidget(self.start_button)
+        control_layout.addWidget(self.stop_button)
+        control_group.setLayout(control_layout)
+        config_layout.addWidget(control_group)
+
+        output_panel = QWidget()
+        output_layout = QVBoxLayout(output_panel)
+
+        # Splitter for plots and logs
+        splitter = QSplitter(Qt.Vertical)
+
+        self.plot_widget = PlotWidget() # Our custom Matplotlib widget
+        splitter.addWidget(self.plot_widget)
+
+        self.log_output_area = QTextEdit()
+        self.log_output_area.setReadOnly(True)
+        self.log_output_area.setFontFamily("Courier") # Monospaced font for logs
+        self.log_output_area.setLineWrapMode(QTextEdit.NoWrap) # No line wrapping for logs
+        
+        log_group = QGroupBox("Training Logs")
+        log_layout = QVBoxLayout()
+        log_layout.addWidget(self.log_output_area)
+        log_group.setLayout(log_layout)
+        splitter.addWidget(log_group)
+        
+        splitter.setSizes([400, 200]) # Initial sizes for plot and log areas
+
+        output_layout.addWidget(splitter)
+
+        # Add panels to main layout
+        self.main_layout.addWidget(config_panel, 1) # Configuration panel takes 1 part of space
+        self.main_layout.addWidget(output_panel, 3) # Output panel takes 3 parts of space
+
+    def _toggle_pretrained_option(self, model_name): # Enable/disable pretrained checkbox
+        if model_name == "CustomCNN":
+            self.pretrained_checkbox.setChecked(False)
+            self.pretrained_checkbox.setEnabled(False)
+        else: # ResNet50, VGG16
+            self.pretrained_checkbox.setEnabled(True)
+
+    def _collect_config(self): # Collects configuration from GUI elements
+        config = {
+            "model_name": self.model_combo.currentText(),
+            "pretrained": self.pretrained_checkbox.isChecked() if self.pretrained_checkbox.isEnabled() else False,
+            "num_epochs": self.epochs_spinbox.value(),
+            "learning_rate": self.lr_spinbox.value(),
+            "batch_size": self.batch_size_spinbox.value(),
+            "optimizer_name": self.optimizer_combo.currentText(),
+            "device": self.device_combo.currentText(),
+            "augment_data": self.augment_data_checkbox.isChecked(),
+        }
+        return config
+
+    def start_training(self):
+        if self.is_training_running:
+            QMessageBox.warning(self, "Training in Progress", "A training session is already running.")
             return
 
-        # Create a dialog to host the comparison plot widget if it's not already visible
-        # Or, just update it if it's already part of a persistent dialog/window
-        # For simplicity, we'll make it a modal dialog for now
+        self.log_output_area.clear() # Clear previous logs
+        self.plot_widget.reset_plot_data() # Reset plots
         
-        dialog = QDialog(self) # Create a dialog
-        dialog.setWindowTitle("Model Performance Comparison")
-        layout = QVBoxLayout()
-        
-        # Recreate a new plot widget for the dialog to avoid issues with reparenting
-        temp_comparison_plot = PlotWidget()
-        temp_comparison_plot.reset_plot("Overall Model Comparison")
+        config = self._collect_config()
+        self.log_output_area.append("Starting training with configuration:")
+        self.log_output_area.append(json.dumps(config, indent=2))
+        self.log_output_area.append("-" * 50 + "\n")
 
-        for model_name, data in self.all_training_results.items(): # Iterate through results
-            if data['epochs']: # Check if data exists
-                epochs = data['epochs']
-                # For clarity, plot only validation accuracy and validation loss on the comparison
-                val_acc = data['val_acc']
-                val_loss = data['val_loss']
-                
-                temp_comparison_plot.add_comparison_data(
-                    label=f"{model_name}", 
-                    epochs=epochs, 
-                    train_acc=[], # Not plotting train_acc here for clarity
-                    val_acc=val_acc, 
-                    train_loss=[], # Not plotting train_loss here
-                    val_loss=[],   # Filled by next call
-                    plot_type='accuracy'
-                )
-                temp_comparison_plot.add_comparison_data(
-                    label=f"{model_name}",
-                    epochs=epochs,
-                    train_acc=[],
-                    val_acc=[], # Filled by previous call
-                    train_loss=[],
-                    val_loss=val_loss,
-                    plot_type='loss'
-                )
+        self.training_process = QProcess(self)
+        script_path = os.path.join(os.path.dirname(sys.executable if getattr(sys, 'frozen', False) else __file__), "..", "run_training.py")
         
-        layout.addWidget(temp_comparison_plot) # Add plot to dialog layout
-        dialog.setLayout(layout)
-        dialog.resize(800, 600) # Set dialog size
-        dialog.exec_() # Show dialog modally
+        # If running from source (e.g. python main.py)
+        if not getattr(sys, 'frozen', False): # not in a PyInstaller bundle
+            project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+            script_path = os.path.join(project_root, "run_training.py")
+            python_executable = sys.executable # Use the same python interpreter
+        else: # If bundled with PyInstaller
+            base_path = os.path.dirname(sys.executable)
+            script_path = os.path.join(base_path, "run_training.py")
+            python_executable = sys.executable 
+
+            project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+            script_path = os.path.join(project_root, "run_training.py")
+            python_executable = sys.executable
 
 
-    def closeEvent(self, event): # Handle window close event
-        if self.current_training_worker and self.current_training_worker.isRunning():
-            reply = QMessageBox.question(self, 'Confirm Exit',
-                                         "A training process is currently running. Are you sure you want to exit? This will stop the training.",
-                                         QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
-            if reply == QMessageBox.Yes:
-                self.current_training_worker.stop_training() # Attempt to stop worker
-                event.accept() # Accept close event
+        self.training_process.readyReadStandardOutput.connect(self.handle_stdout)
+        self.training_process.readyReadStandardError.connect(self.handle_stderr)
+        self.training_process.finished.connect(self.training_finished)
+        self.training_process.errorOccurred.connect(self.training_error)
+
+        # Construct arguments for run_training.py
+        args = []
+        for key, value in config.items():
+            args.append(f"--{key.replace('_', '-')}") # e.g., --model-name
+            args.append(str(value))
+        
+        self.log_output_area.append(f"Executing: {python_executable} {script_path} {' '.join(args)}\n")
+        
+        try:
+            self.training_process.start(python_executable, [script_path] + args)
+            if self.training_process.waitForStarted(5000): # Wait 5s for process to start
+                self.is_training_running = True
+                self.start_button.setEnabled(False)
+                self.stop_button.setEnabled(True)
+                self.log_output_area.append("Training process started...\n")
             else:
-                event.ignore() # Ignore close event
+                self.log_output_area.append("Error: Training process failed to start.")
+                self.log_output_area.append(f"Process error: {self.training_process.errorString()}")
+                self.is_training_running = False
+                self.start_button.setEnabled(True)
+                self.stop_button.setEnabled(False)
+        except Exception as e:
+            self.log_output_area.append(f"Exception starting process: {str(e)}")
+            QMessageBox.critical(self, "Process Error", f"Could not start training process: {str(e)}")
+            self.is_training_running = False
+            self.start_button.setEnabled(True)
+            self.stop_button.setEnabled(False)
+
+
+    def handle_stdout(self):
+        data = self.training_process.readAllStandardOutput().data().decode().strip()
+        if data:
+            self.log_output_area.append(data)
+            # Check for our specific metrics update prefix
+            for line in data.splitlines():
+                if line.startswith("METRICS_UPDATE:"):
+                    try:
+                        metrics_json = line.replace("METRICS_UPDATE:", "")
+                        metrics = json.loads(metrics_json)
+                        self.plot_widget.update_plot(
+                            epoch=metrics["epoch"],
+                            train_loss=metrics["train_loss"],
+                            val_loss=metrics["val_loss"],
+                            train_acc=metrics["train_acc"],
+                            val_acc=metrics["val_acc"]
+                        )
+                    except json.JSONDecodeError as e:
+                        self.log_output_area.append(f"Error decoding metrics JSON: {e} - Line: {line}")
+                    except KeyError as e:
+                        self.log_output_area.append(f"KeyError in metrics data: {e} - Data: {metrics_json}")
+        self.log_output_area.verticalScrollBar().setValue(self.log_output_area.verticalScrollBar().maximum())
+
+
+    def handle_stderr(self):
+        data = self.training_process.readAllStandardError().data().decode().strip()
+        if data:
+            self.log_output_area.append(f"<font color='red'>{data}</font>") # Show errors in red
+        self.log_output_area.verticalScrollBar().setValue(self.log_output_area.verticalScrollBar().maximum())
+
+    def training_finished(self, exit_code, exit_status):
+        self.log_output_area.append("-" * 50)
+        if exit_status == QProcess.NormalExit and exit_code == 0:
+            self.log_output_area.append("Training process finished successfully.")
+        elif exit_status == QProcess.CrashExit:
+            self.log_output_area.append(f"<font color='red'>Training process crashed.</font>")
         else:
-            event.accept() # Accept close event
+            self.log_output_area.append(f"<font color='red'>Training process finished with exit code {exit_code}.</font>")
+        
+        self.is_training_running = False
+        self.start_button.setEnabled(True)
+        self.stop_button.setEnabled(False)
+        self.training_process = None # Clear the process
+
+    def training_error(self, error):
+        error_map = {
+            QProcess.FailedToStart: "Failed to start",
+            QProcess.Crashed: "Crashed",
+            QProcess.Timedout: "Timed out",
+            QProcess.ReadError: "Read error",
+            QProcess.WriteError: "Write error",
+            QProcess.UnknownError: "Unknown error"
+        }
+        error_string = error_map.get(error, "An unknown error occurred")
+        self.log_output_area.append(f"<font color='red'>Training process error: {error_string} ({self.training_process.errorString()})</font>")
+
+
+    def stop_training(self):
+        if self.training_process and self.is_training_running:
+            self.log_output_area.append("Attempting to stop training process...")
+           
+            self.training_process.terminate() # Sends SIGTERM
+            
+            # Give it a moment to terminate gracefully
+            if not self.training_process.waitForFinished(3000): # Wait 3 seconds
+                self.log_output_area.append("Process did not terminate gracefully, killing...")
+                self.training_process.kill() # Sends SIGKILL
+
+            # training_finished slot will handle UI updates
+            self.stop_button.setEnabled(False) # Disable stop button immediately
+        else:
+            self.log_output_area.append("No training process to stop.")
+    
+    def closeEvent(self, event): # Handle closing the window while training
+        if self.is_training_running and self.training_process:
+            reply = QMessageBox.question(self, 'Training in Progress',
+                                           "A training process is still running. Do you want to stop it and exit?",
+                                           QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+            if reply == QMessageBox.Yes:
+                self.stop_training()
+                if self.training_process:
+                    self.training_process.waitForFinished(1000) 
+                event.accept()
+            else:
+                event.ignore()
+        else:
+            event.accept()
+
+
+if __name__ == '__main__':
+    app = QApplication(sys.argv)
+    app.setStyle("Fusion") 
+    main_win = MainWindow()
+    main_win.show()
+    sys.exit(app.exec_())

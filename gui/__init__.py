@@ -1,6 +1,3 @@
-# Hasan Taha Bağcı
-# 150210338
-# GUI Package Initializer
-
-from .main_window import MainWindow
-from .training_worker import TrainingWorker
+# Hasan Taha Bağcı 150210338
+# gui/__init__.py
+# This file makes the 'gui' directory a Python package.

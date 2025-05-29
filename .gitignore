@@ -175,3 +175,5 @@ cython_debug/
 
 # My ignores
 data/
+
+.DS_Store
